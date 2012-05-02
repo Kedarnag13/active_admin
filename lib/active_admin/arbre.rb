@@ -8,6 +8,7 @@ require "active_admin/arbre/html/tag"
 require "active_admin/arbre/html/document"
 require "active_admin/arbre/html/html5_elements"
 require "active_admin/arbre/html/text_node"
+require "active_admin/view_helpers.rb"
 
 # Arbre - The DOM Tree in Ruby
 #
