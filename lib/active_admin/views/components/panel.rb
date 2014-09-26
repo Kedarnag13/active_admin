@@ -6,11 +6,11 @@ module ActiveAdmin
 
       def build(title, attributes = {})
         icon_name = attributes.delete(:icon)
-        icn = icon_name ? icon(icon_name) : ""
+        icn = icon_name ? icon(icon_name) : "".html_safe
         super(attributes)
         add_class "panel"
         @title = h3(icn + title.to_s)
-        @contents = div(:class => "panel_contents")
+        @contents = div(class: "panel_contents")
       end
 
       def add_child(child)
@@ -28,7 +28,13 @@ module ActiveAdmin
         @contents.children?
       end
 
-    end
+      def header_action(*args)
+        action = args[0]
 
+        @title << div(class: 'header_action') do
+          action
+        end
+      end
+    end
   end
 end

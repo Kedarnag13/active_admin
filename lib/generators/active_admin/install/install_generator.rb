@@ -1,20 +1,14 @@
+require 'rails/generators/active_record'
+
 module ActiveAdmin
   module Generators
-    class InstallGenerator < Rails::Generators::NamedBase
+    class InstallGenerator < ActiveRecord::Generators::Base
       desc "Installs Active Admin and generates the necessary migrations"
-      argument :name, :type => :string, :default => "AdminUser"
+      argument :name, type: :string, default: "AdminUser"
 
-      hook_for :users, :default => "devise", :desc => "Admin user generator to run. Skip with --skip-users"
+      hook_for :users, default: "devise", desc: "Admin user generator to run. Skip with --skip-users"
 
-      include Rails::Generators::Migration
-
-      def self.source_root
-        @_active_admin_source_root ||= File.expand_path("../templates", __FILE__)
-      end  
-
-      def self.next_migration_number(dirname)
-        Time.now.strftime("%Y%m%d%H%M%S")
-      end
+      source_root File.expand_path("../templates", __FILE__)
 
       def copy_initializer
         @underscored_user_name = name.underscore
@@ -23,11 +17,19 @@ module ActiveAdmin
 
       def setup_directory
         empty_directory "app/admin"
-        template 'dashboards.rb', 'app/admin/dashboards.rb'
+        template 'dashboard.rb', 'app/admin/dashboard.rb'
+        if options[:users].present?
+          @user_class = name
+          template 'admin_user.rb.erb', "app/admin/#{name.underscore}.rb"
+        end
       end
 
       def setup_routes
-        route "ActiveAdmin.routes(self)"
+        if options[:users] # Ensure Active Admin routes occur after Devise routes so that Devise has higher priority
+          inject_into_file "config/routes.rb", "\n  ActiveAdmin.routes(self)", after: /devise_for .*, ActiveAdmin::Devise\.config/
+        else
+          route "ActiveAdmin.routes(self)"
+        end
       end
 
       def create_assets
@@ -35,11 +37,7 @@ module ActiveAdmin
       end
 
       def create_migrations
-        Dir["#{self.class.source_root}/migrations/*.rb"].sort.each do |filepath|
-          name = File.basename(filepath)
-          migration_template "migrations/#{name}", "db/migrate/#{name.gsub(/^\d+_/,'')}"
-          sleep 1
-        end
+        migration_template 'migrations/create_active_admin_comments.rb', 'db/migrate/create_active_admin_comments.rb'
       end
     end
   end

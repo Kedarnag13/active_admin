@@ -1,27 +1,32 @@
 # Detects the current version of Rails that is being used
 #
-# You can pass it in as an ENV variable or it will use
-# the current Gemfile.lock to find it
+#
+RAILS_VERSION_FILE ||= File.expand_path("../../../.rails-version", __FILE__)
 
-unless defined?(RAILS_VERSION_FILE)
-  RAILS_VERSION_FILE = File.expand_path("../../../.rails-version", __FILE__)
+unless defined? TRAVIS_CONFIG
+  require 'yaml'
+  filename = File.expand_path("../../../.travis.yml", __FILE__)
+  TRAVIS_CONFIG = YAML.load_file filename
+  TRAVIS_RAILS_VERSIONS = TRAVIS_CONFIG['env']['matrix'].grep(/RAILS=(.*)/){ $1 }
 end
 
-unless defined?(DEFAULT_RAILS_VERSION)
-  DEFAULT_RAILS_VERSION = "3.2.0"
-end
+DEFAULT_RAILS_VERSION ||= TRAVIS_RAILS_VERSIONS.first
 
 def detect_rails_version
-  detected_version = if File.exists?(RAILS_VERSION_FILE)
+  version = version_from_file || ENV['RAILS'] || DEFAULT_RAILS_VERSION
+ensure
+  puts "Detected Rails: #{version}" if ENV['DEBUG']
+end
+
+def detect_rails_version!
+  detect_rails_version or raise "can't find a version of Rails to use!"
+end
+
+def version_from_file
+  if File.exists?(RAILS_VERSION_FILE)
     version = File.read(RAILS_VERSION_FILE).chomp.strip
-    version != "" ? version : DEFAULT_RAILS_VERSION
-  else
-    DEFAULT_RAILS_VERSION
+    version unless version == ''
   end
-
-  puts "Detected Rails: #{detected_version}" if ENV['DEBUG']
-
-  detected_version
 end
 
 def write_rails_version(version)

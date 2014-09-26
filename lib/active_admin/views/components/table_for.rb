@@ -7,21 +7,23 @@ module ActiveAdmin
         'table'
       end
 
-      def build(collection, options = {})
-        @sortable = options.delete(:sortable)
+      def build(obj, options = {})
+        @sortable       = options.delete(:sortable)
         @resource_class = options.delete(:i18n)
-        @collection = collection
-        @columns = []
+        @collection     = obj.respond_to?(:each) && !obj.is_a?(Hash) ? obj : [obj]
+        @columns        = []
+        @row_class      = options.delete(:row_class)
+
         build_table
         super(options)
       end
 
       def column(*args, &block)
-        options = default_options.merge(args.last.is_a?(::Hash) ? args.pop : {})
+        options = default_options.merge(args.extract_options!)
         title = args[0]
         data  = args[1] || args[0]
 
-        col = Column.new(title, data, options, &block)
+        col = Column.new(title, data, @resource_class, options, &block)
         @columns << col
 
         # Build our header item
@@ -32,18 +34,13 @@ module ActiveAdmin
         # Add a table cell for each item
         @collection.each_with_index do |item, i|
           within @tbody.children[i] do
-            build_table_cell(col, item)
+            build_table_cell col, item
           end
         end
       end
 
       def sortable?
-        @sortable
-      end
-
-      # Returns the columns to display based on the conditional block
-      def visible_columns
-        @visible_columns ||= @columns.select{|col| col.display_column? }
+        !!@sortable
       end
 
       protected
@@ -60,42 +57,60 @@ module ActiveAdmin
       end
 
       def build_table_header(col)
-        if sortable? && col.sortable?
-          build_sortable_header_for(col.title, col.sort_key)
+        classes  = Arbre::HTML::ClassList.new
+        sort_key = sortable? && col.sortable? && col.sort_key
+        params   = request.query_parameters.except :page, :order, :commit, :format
+
+        classes << 'sortable'                         if sort_key
+        classes << "sorted-#{current_sort[1]}"        if sort_key && current_sort[0] == sort_key
+        classes << col.html_class
+
+        if sort_key
+          th class: classes do
+            link_to col.pretty_title, params: params, order: "#{sort_key}_#{order_for_sort_key(sort_key)}"
+          end
         else
-          th(col.title, :class => (col.data.to_s.downcase.underscore if col.data.is_a?(Symbol)))
-        end
-      end
-
-      def build_sortable_header_for(title, sort_key)
-        classes = Arbre::HTML::ClassList.new(["sortable"])
-        if current_sort[0] == sort_key
-          classes << "sorted-#{current_sort[1]}"
-        end
-        
-        header_class = title.downcase.underscore
-        
-        classes << header_class
-
-        th :class => classes do
-          link_to(title, params.merge(:order => "#{sort_key}_#{order_for_sort_key(sort_key)}").except(:page))
+          th col.pretty_title, class: classes
         end
       end
 
       def build_table_body
         @tbody = tbody do
           # Build enough rows for our collection
-          @collection.each{|_| tr(:class => cycle('odd', 'even'), :id => dom_id(_)) }
+          @collection.each do |elem|
+            classes = [cycle('odd', 'even')]
+
+            if @row_class
+              classes << @row_class.call(elem)
+            end
+
+            tr(class: classes.flatten.join(' '), id: dom_id_for(elem))
+          end
         end
       end
 
       def build_table_cell(col, item)
-        td(:class => (col.data.to_s.downcase if col.data.is_a?(Symbol))) do
-          rvalue = call_method_or_proc_on(item, col.data, :exec => false)
-          if col.data.is_a?(Symbol)
-            rvalue = pretty_format(rvalue)
-          end
-          rvalue
+        td class: col.html_class do
+          render_data col.data, item
+        end
+      end
+
+      def render_data(data, item)
+        value = if data.is_a? Proc
+          data.call item
+        elsif item.respond_to? data
+          item.public_send data
+        elsif item.respond_to? :[]
+          item[data]
+        end
+        value = pretty_format(value) if data.is_a?(Symbol)
+        value = status_tag value     if is_boolean? data, item
+        value
+      end
+
+      def is_boolean?(data, item)
+        if item.respond_to? :column_for_attribute
+          attr = item.column_for_attribute(data) and attr.type == :boolean 
         end
       end
 
@@ -103,10 +118,14 @@ module ActiveAdmin
       #   current_sort[0] #=> sort_key
       #   current_sort[1] #=> asc | desc
       def current_sort
-        @current_sort ||= if params[:order] && params[:order] =~ /^([\w\_\.]+)_(desc|asc)$/
-          [$1,$2]
-        else
-          []
+        @current_sort ||= begin
+          order_clause = OrderClause.new params[:order]
+
+          if order_clause.valid?
+            [order_clause.field, order_clause.order]
+          else
+            []
+          end
         end
       end
 
@@ -122,26 +141,39 @@ module ActiveAdmin
 
       def default_options
         {
-          :i18n => @resource_class
+          i18n: @resource_class
         }
       end
 
       class Column
 
-        attr_accessor :title, :data
+        attr_accessor :title, :data , :html_class
 
-        def initialize(*args, &block)
-          @options = default_options.merge(args.last.is_a?(::Hash) ? args.pop : {})
-          @title = pretty_title args[0]
-          @data  = args[1] || args[0]
+        def initialize(*args, &block) 
+          @options = args.extract_options!
+
+          @title = args[0]
+          html_classes = [:col]
+          if @options.has_key?(:class)
+            html_classes << @options.delete(:class)
+          elsif @title.present?
+            html_classes << "col-#{@title.to_s.parameterize('_')}"
+          end
+          @html_class = html_classes.join(' ')
+          @data = args[1] || args[0]
           @data = block if block
+          @resource_class = args[2]
         end
 
         def sortable?
           if @data.is_a?(Proc)
             [String, Symbol].include?(@options[:sortable].class)
-          else
+          elsif @options.has_key?(:sortable)
             @options[:sortable]
+          elsif @data.respond_to?(:to_sym) && @resource_class
+            !@resource_class.reflect_on_association(@data.to_sym)
+          else
+            true
           end
         end
 
@@ -154,43 +186,36 @@ module ActiveAdmin
         #
         # You can set the sort key by passing a string or symbol
         # to the sortable option:
-        #   column :username, :sortable => 'other_column_to_sort_on'
+        #   column :username, sortable: 'other_column_to_sort_on'
         #
         # If you pass a block to be rendered for this column, the column
         # will not be sortable unless you pass a string to sortable to
         # sort the column on:
         #
-        #   column('Username', :sortable => 'login'){ @user.pretty_name }
+        #   column('Username', sortable: 'login'){ @user.pretty_name }
         #   # => Sort key will be 'login'
         #
         def sort_key
-          if @options[:sortable] == true || @options[:sortable] == false
+          # If boolean or nil, use the default sort key.
+          if @options[:sortable] == true || @options[:sortable] == false || @options[:sortable].nil?
             @data.to_s
           else
             @options[:sortable].to_s
           end
         end
 
-        private
-
-        def pretty_title(raw)
-          if raw.is_a?(Symbol)
-            if @options[:i18n] && @options[:i18n].respond_to?(:human_attribute_name) && human_name = @options[:i18n].human_attribute_name(raw)
-              raw = human_name
+        def pretty_title
+          if @title.is_a? Symbol
+            default = @title.to_s.titleize
+            if @options[:i18n].respond_to? :human_attribute_name
+              @title = @options[:i18n].human_attribute_name @title, default: default
+            else
+              default
             end
-
-            raw.to_s.titleize
           else
-            raw
+            @title
           end
         end
-
-        def default_options
-          {
-            :sortable => true
-          }
-        end
-
       end
     end
   end

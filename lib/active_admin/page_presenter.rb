@@ -7,7 +7,7 @@ module ActiveAdmin
   #
   # Usage:
   #
-  #     presenter = PagePresenter.new :as => :table do
+  #     presenter = PagePresenter.new as: :table do
   #       # some awesome stuff
   #     end
   #
@@ -17,6 +17,8 @@ module ActiveAdmin
   class PagePresenter
 
     attr_reader :block, :options
+
+    delegate :has_key?, to: :options
 
     def initialize(options = {}, &block)
       @options, @block = options, block

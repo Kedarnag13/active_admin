@@ -8,7 +8,9 @@ Feature: New Page
     And I am logged in
     Given a configuration of:
     """
-      ActiveAdmin.register Post
+      ActiveAdmin.register Post do
+        permit_params :custom_category_id, :author_id, :title, :body, :published_at, :starred if Rails::VERSION::MAJOR == 4
+      end
     """
     When I am on the index page for posts
 
@@ -22,13 +24,15 @@ Feature: New Page
     Then I should see "Post was successfully created."
     And I should see the attribute "Title" with "Hello World"
     And I should see the attribute "Body" with "This is the body"
-    And I should see the attribute "Category" with "Music"
+    #And I should see the attribute "Category" with "Music"
     And I should see the attribute "Author" with "John Doe"
 
   Scenario: Generating a custom form
     Given a configuration of:
     """
       ActiveAdmin.register Post do
+        permit_params :custom_category_id, :author_id, :title, :body, :published_at, :starred if Rails::VERSION::MAJOR == 4
+
         form do |f|
           f.inputs "Your Post" do
             f.input :title
@@ -37,7 +41,7 @@ Feature: New Page
           f.inputs "Publishing" do
             f.input :published_at
           end
-          f.buttons
+          f.actions
         end
       end
     """
@@ -57,12 +61,14 @@ Feature: New Page
       <% url = @post.new_record? ? admin_posts_path : admin_post_path(@post) %>
       <%= active_admin_form_for @post, :url => url do |f|
             f.inputs :title, :body
-            f.buttons 
+            f.actions
           end %>
     """
     Given a configuration of:
     """
       ActiveAdmin.register Post do
+        permit_params :custom_category_id, :author_id, :title, :body, :published_at, :starred if Rails::VERSION::MAJOR == 4
+
         form :partial => "form"
       end
     """
@@ -78,6 +84,8 @@ Feature: New Page
     Given a configuration of:
     """
       ActiveAdmin.register Post do
+        permit_params :custom_category_id, :author_id, :title, :body, :published_at, :starred if Rails::VERSION::MAJOR == 4
+
         form do |f|
           f.inputs "Your Post" do
             if current_admin_user && false
@@ -89,7 +97,7 @@ Feature: New Page
           f.inputs "Publishing" do
             f.input :published_at
           end
-          f.buttons
+          f.actions
         end
       end
     """

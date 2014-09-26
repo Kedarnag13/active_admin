@@ -16,15 +16,15 @@ Feature: User Logging In
     And I fill in "Password" with "password"
     And I press "Login"
     Then I should be on the the dashboard
-    And I should see "Logout"
-    And I should see "admin@example.com"
+    And I should see the element "a[href='/admin/logout'       ]:contains('Logout')"
+    And I should see the element "a[href='/admin/admin_users/1']:contains('admin@example.com')"
 
-  Scenario: Attempting to log in with an incorrent email address
+  Scenario: Attempting to log in with an incorrect email address
     When I fill in "Email" with "not-an-admin@example.com"
     And I fill in "Password" with "not-my-password"
     And I press "Login"
     Then I should see "Login"
-    And I should see "Invalid email or password."
+    And I should see "Invalid email address or password."
 
   Scenario: Attempting to log in with an incorrect password
     When I fill in "Email" with "admin@example.com"

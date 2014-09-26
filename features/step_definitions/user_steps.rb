@@ -1,29 +1,45 @@
-Given /^I am logged out$/ do
-  if page.all(:css, "a", :text => "Logout").size > 0
-    click_link "Logout"
+def ensure_user_created(email)
+  user = AdminUser.where(email: email).first_or_create(password: 'password', password_confirmation: 'password')
+
+  unless user.persisted?
+    raise "Could not create user #{email}: #{user.errors.full_messages}"
   end
+  user
+end
+
+Given /^(?:I am logged|log) out$/ do
+  click_link 'Logout' if page.all(:css, "a", text: 'Logout').any?
 end
 
 Given /^I am logged in$/ do
-  step 'an admin user "admin@example.com" exists'
-
-  if page.all(:css, "a", :text => "Logout").size > 0
-    click_link "Logout"
-  end
-
-  visit new_admin_user_session_path
-  fill_in "Email", :with => "admin@example.com"
-  fill_in "Password", :with => "password"
-  click_button "Login"
+  step 'log out'
+  login_as ensure_user_created 'admin@example.com'
 end
 
-Given /^an admin user "([^"]*)" exists$/ do |admin_email|
-  user = AdminUser.find_or_create_by_email :email => admin_email,
-                                           :password => "password",
-                                           :password_confirmation => "password"
+# only for @requires-reloading scenario
+Given /^I am logged in with capybara$/ do
+  ensure_user_created 'admin@example.com'
+  step 'log out'
 
-  unless user.persisted?
-    puts "Coult not create an admin user #{admin_email}: #{user.errors.full_messages}"
-    raise "Could not create an admin user"
-  end
+  visit new_admin_user_session_path
+  fill_in 'Email',    with: 'admin@example.com'
+  fill_in 'Password', with: 'password'
+  click_button 'Login'
+end
+
+Given /^an admin user "([^"]*)" exists$/ do |email|
+  ensure_user_created(email)
+end
+
+Given /^"([^"]*)" requests a password reset with token "([^"]*)"( but it expires)?$/ do |email, token, expired|
+  visit new_admin_user_password_path
+  fill_in 'Email', with: email
+  allow(Devise).to receive(:friendly_token).and_return(token)
+  click_button "Reset My Password"
+
+  AdminUser.where(email: email).first.update_attribute :reset_password_sent_at, 1.month.ago if expired
+end
+
+When /^I fill in the password field with "([^"]*)"$/ do |password|
+  fill_in 'admin_user_password', with: password
 end

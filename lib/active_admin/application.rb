@@ -4,13 +4,9 @@ require 'active_admin/helpers/settings'
 module ActiveAdmin
   class Application
     include Settings
+    include Settings::Inheritance
 
-    # Adds settings to both the Application and the Namespace instance
-    # so that they can be configured independantly.
-    def self.inheritable_setting(name, default)
-      Namespace.setting name, nil
-      setting name, default
-    end
+    settings_inherited_by Namespace
 
     # The default namespace to put controllers and routes inside. Set this
     # in config/initializers/active_admin.rb using:
@@ -19,8 +15,10 @@ module ActiveAdmin
     #
     setting :default_namespace, :admin
 
-    # A hash of all the registered namespaces
-    setting :namespaces, {}
+    attr_reader :namespaces
+    def initialize
+      @namespaces = {}
+    end
 
     # Load paths for admin configurations. Add folders to this load path
     # to load up other resources for administration. External gems can
@@ -38,6 +36,9 @@ module ActiveAdmin
 
     # Set the site title image displayed in the main layout (has precendence over :site_title)
     inheritable_setting :site_title_image, ""
+
+    # Set a favicon
+    inheritable_setting :favicon, false
 
     # The view factory to use to generate all the view classes. Take
     # a look at ActiveAdmin::ViewFactory
@@ -57,6 +58,30 @@ module ActiveAdmin
     # The method to use when generating the link for user logout
     inheritable_setting :logout_link_method, :get
 
+    # Whether the batch actions are enabled or not
+    inheritable_setting :batch_actions, false
+
+    # Whether filters are enabled
+    inheritable_setting :filters, true
+
+    # The namespace root.
+    inheritable_setting :root_to, 'dashboard#index'
+
+    # Display breadcrumbs
+    inheritable_setting :breadcrumb, true
+
+    # Default CSV options
+    inheritable_setting :csv_options, {col_sep: ','}
+
+    # Default Download Links options
+    inheritable_setting :download_links, true
+
+    # The authorization adapter to use
+    inheritable_setting :authorization_adapter, ActiveAdmin::AuthorizationAdapter
+
+    # A proc to be used when a user is not authorized to view the current resource
+    inheritable_setting :on_unauthorized_access, :rescue_active_admin_access_denied
+
     # Active Admin makes educated guesses when displaying objects, this is
     # the list of methods it tries calling in order
     setting :display_name_methods, [ :display_name,
@@ -70,34 +95,29 @@ module ActiveAdmin
 
     # == Deprecated Settings
 
-    # @deprecated The default sort order for index pages
-    deprecated_setting :default_sort_order, 'id_desc'
-
-    # DEPRECATED: This option is deprecated and will be removed. Use
-    # the #allow_comments_in option instead
-    attr_accessor :admin_notes
+    # (none currently)
 
     include AssetRegistration
 
     # Event that gets triggered on load of Active Admin
     BeforeLoadEvent = 'active_admin.application.before_load'.freeze
-    AfterLoadEvent = 'active_admin.application.after_load'.freeze
+    AfterLoadEvent  = 'active_admin.application.after_load'.freeze
 
+    # Runs before the app's AA initializer
     def setup!
       register_default_assets
     end
 
+    # Runs after the app's AA initializer
     def prepare!
       remove_active_admin_load_paths_from_rails_autoload_and_eager_load
       attach_reloader
-      generate_stylesheets
     end
 
     # Registers a brand new configuration for the given resource.
     def register(resource, options = {}, &block)
-      namespace_name = extract_namespace_name(options)
-      namespace = find_or_create_namespace(namespace_name)
-      namespace.register(resource, options, &block)
+      ns = options.fetch(:namespace){ default_namespace }
+      namespace(ns).register resource, options, &block
     end
 
     # Creates a namespace for the given name
@@ -105,17 +125,19 @@ module ActiveAdmin
     # Yields the namespace if a block is given
     #
     # @returns [Namespace] the new or existing namespace
-    def find_or_create_namespace(name)
+    def namespace(name)
       name ||= :root
-      return namespaces[name] if namespaces[name]
-      namespace = Namespace.new(self, name)
-      namespaces[name] = namespace
-      ActiveAdmin::Event.dispatch ActiveAdmin::Namespace::RegisterEvent, namespace
+
+      namespace = namespaces[name] ||= begin
+        namespace = Namespace.new(self, name)
+        ActiveAdmin::Event.dispatch ActiveAdmin::Namespace::RegisterEvent, namespace
+        namespace
+      end
+
       yield(namespace) if block_given?
+
       namespace
     end
-
-    alias_method :namespace, :find_or_create_namespace
 
     # Register a page
     #
@@ -124,146 +146,105 @@ module ActiveAdmin
     # @&block The registration block.
     #
     def register_page(name, options = {}, &block)
-      namespace_name = extract_namespace_name(options)
-      namespace = find_or_create_namespace(namespace_name)
-      namespace.register_page(name, options, &block)
+      ns = options.fetch(:namespace){ default_namespace }
+      namespace(ns).register_page name, options, &block
     end
 
-    # Stores if everything has been loaded or we need to reload
-    @@loaded = false
-
-    # Returns true if all the configuration files have been loaded.
+    # Whether all configuration files have been loaded
     def loaded?
-      @@loaded
+      @@loaded ||= false
     end
 
-    # Removes all the controllers that were defined by registering
-    # resources for administration.
-    #
-    # We remove them, then load them on each request in development
-    # to allow for changes without having to restart the server.
+    # Removes all defined controllers from memory. Useful in
+    # development, where they are reloaded on each request.
     def unload!
-      namespaces.values.each{|namespace| namespace.unload! }
+      namespaces.values.each &:unload!
       @@loaded = false
     end
 
-    # Loads all of the ruby files that are within the load path of
-    # ActiveAdmin.load_paths. This should load all of the administration
-    # UIs so that they are available for the router to proceed.
-    #
-    # The files are only loaded if we haven't already loaded all the files
-    # and they aren't marked for re-loading. To mark the files for re-loading
-    # you must first call ActiveAdmin.unload!
+    # Loads all ruby files that are within the load_paths setting.
+    # To reload everything simply call `ActiveAdmin.unload!`
     def load!
-      # No work to do if we've already loaded
-      return false if loaded?
-
-      ActiveAdmin::Event.dispatch BeforeLoadEvent, self
-
-      # Load files
-      files_in_load_path.each{|file| load file }
-
-      # If no configurations, let's make sure you can still login
-      load_default_namespace if namespaces.values.empty?
-
-      # Dispatch an ActiveAdmin::Application::LoadEvent with the Application
-      ActiveAdmin::Event.dispatch AfterLoadEvent, self
-
-      @@loaded = true
+      unless loaded?
+        ActiveAdmin::Event.dispatch BeforeLoadEvent, self # before_load hook
+        files.each{ |file| load file }                    # load files
+        namespace(default_namespace)                      # init AA resources
+        ActiveAdmin::Event.dispatch AfterLoadEvent, self  # after_load hook
+        @@loaded = true
+      end
     end
 
-    # Returns ALL the files to load from all the load paths
-    def files_in_load_path
-      load_paths.flatten.compact.uniq.collect{|path| Dir["#{path}/**/*.rb"] }.flatten
+    def load(file)
+      DatabaseHitDuringLoad.capture{ super }
+    end
+
+    # Returns ALL the files to be loaded
+    def files
+      load_paths.flatten.compact.uniq.map{ |path| Dir["#{path}/**/*.rb"] }.flatten
     end
 
     def router
       @router ||= Router.new(self)
     end
 
+    # One-liner called by user's config/routes.rb file
     def routes(rails_router)
-      # Ensure that all the configurations (which define the routes)
-      # are all loaded
       load!
-
       router.apply(rails_router)
     end
 
-    def load_default_namespace
-      find_or_create_namespace(default_namespace)
-    end
-
-    #
-    # Add before, around and after filters to each registered resource.
-    #
-    # eg:
-    #
+    # Adds before, around and after filters to all controllers.
+    # Example usage:
     #   ActiveAdmin.before_filter :authenticate_admin!
     #
-    def before_filter(*args, &block)
-      ResourceController.before_filter(*args, &block)
+    %w(before_filter skip_before_filter after_filter skip_after_filter around_filter skip_filter).each do |name|
+      define_method name do |*args, &block|
+        controllers_for_filters.each do |controller|
+          controller.public_send name, *args, &block
+        end
+      end
     end
 
-    def skip_before_filter(*args, &block)
-      ResourceController.skip_before_filter(*args, &block)
+    def controllers_for_filters
+      controllers = [BaseController]
+      controllers.push *Devise.controllers_for_filters if Dependency.devise?
+      controllers
     end
 
-    def after_filter(*args, &block)
-      ResourceController.after_filter(*args, &block)
-    end
-
-    def around_filter(*args, &block)
-      ResourceController.around_filter(*args, &block)
-    end
-
-    # Helper method to add a dashboard section
-    def dashboard_section(name, options = {}, &block)
-      ActiveAdmin::Dashboards.add_section(name, options, &block)
-    end
-
-    private
+  private
 
     def register_default_assets
-      register_stylesheet 'active_admin.css', :media => 'screen'
-      register_stylesheet 'active_admin/print.css', :media => 'print'
-
-      if !ActiveAdmin.use_asset_pipeline?
-        register_javascript 'jquery.min.js'
-        register_javascript 'jquery-ui.min.js'
-        register_javascript 'jquery_ujs.js'
-      end
+      register_stylesheet 'active_admin.css',       media: 'screen'
+      register_stylesheet 'active_admin/print.css', media: 'print'
 
       register_javascript 'active_admin.js'
     end
 
-    def extract_namespace_name(options)
-      options.has_key?(:namespace) ? options[:namespace] : default_namespace
-    end
-
-    # Since we're dealing with all our own file loading, we need
-    # to remove our paths from the ActiveSupport autoload paths.
-    # If not, file naming becomes very important and can cause clashes.
+    # Since app/admin is alphabetically before app/models, we have to remove it
+    # from the host app's +autoload_paths+ to prevent missing constant errors.
+    #
+    # As well, we have to remove it from +eager_load_paths+ to prevent the
+    # files from being loaded twice in production.
     def remove_active_admin_load_paths_from_rails_autoload_and_eager_load
-      ActiveSupport::Dependencies.autoload_paths.reject!{|path| load_paths.include?(path) }
-      # Don't eagerload our configs, we'll deal with them ourselves
-      Rails.application.config.eager_load_paths = Rails.application.config.eager_load_paths.reject do |path|
-        load_paths.include?(path)
-      end
+      ActiveSupport::Dependencies.autoload_paths -= load_paths
+      Rails.application.config.eager_load_paths  -= load_paths
     end
 
+    # Hooks the app/admin directory into our Rails Engine's +watchable_dirs+, so the
+    # files are automatically reloaded in your development environment.
+    #
+    # If files have changed on disk, we forcibly unload all AA configurations, and
+    # tell the host application to redraw routes (triggering AA itself to reload).
     def attach_reloader
-      ActiveAdmin::Reloader.build(Rails.application, self, Rails.version).attach!
-    end
+      load_paths.each do |path|
+        ActiveAdmin::Engine.config.watchable_dirs[path] = [:rb]
+      end
 
-    def generate_stylesheets
-      # Create our own asset pipeline in Rails 3.0
-      if ActiveAdmin.use_asset_pipeline?
-        # Add our mixins to the load path for SASS
-        ::Sass::Engine::DEFAULT_OPTIONS[:load_paths] <<  File.expand_path("../../../app/assets/stylesheets", __FILE__)
-      else
-        require 'active_admin/sass/css_loader'
-        ::Sass::Plugin.add_template_location(File.expand_path("../../../app/assets/stylesheets", __FILE__))
-        ::Sass::Plugin.add_template_location(File.expand_path("../sass", __FILE__))
+      Rails.application.config.after_initialize do
+        ActionDispatch::Reloader.to_prepare do
+          ActiveAdmin.application.unload!
+          Rails.application.reload_routes!
+        end
       end
     end
   end

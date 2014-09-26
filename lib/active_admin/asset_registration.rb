@@ -1,48 +1,29 @@
 module ActiveAdmin
   module AssetRegistration
 
-    # Stylesheets
-
-    def register_stylesheet(*args)
-      stylesheet = ActiveAdmin::Stylesheet.new(*args)
-      stylesheets << stylesheet unless stylesheets.select{ |hash| hash.path == stylesheet.path}.size > 0
+    def register_stylesheet(path, options = {})
+      stylesheets[path] = options
     end
 
     def stylesheets
-      @stylesheets ||= []
+      @stylesheets ||= {}
     end
 
     def clear_stylesheets!
-      @stylesheets = []
+      stylesheets.clear
     end
 
-
-    # Javascripts
-
     def register_javascript(name)
-      javascripts << name unless javascripts.include?(name)
+      javascripts.add name
     end
 
     def javascripts
-      @javascripts ||= []
+      @javascripts ||= Set.new
     end
 
     def clear_javascripts!
-      @javascripts = []
+      javascripts.clear
     end
 
   end
-  
-  # Wrapper class for stylesheet registration
-  class Stylesheet
-    
-    attr_reader :options, :path
-    
-    def initialize(*args)
-      @options = args.extract_options!
-      @path = args.first if args.first
-    end
-    
-  end
-  
 end

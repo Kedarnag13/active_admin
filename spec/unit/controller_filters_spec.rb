@@ -1,34 +1,44 @@
-require 'spec_helper' 
+require 'rails_helper'
 
-describe ActiveAdmin, "filters" do
+describe ActiveAdmin::Application do
   let(:application){ ActiveAdmin::Application.new }
+  let(:controllers){ application.controllers_for_filters }
 
-  describe "before filters" do
-    it "should add a new before filter to ActiveAdmin::ResourceController" do
-      ActiveAdmin::ResourceController.should_receive(:before_filter).and_return(true)
-      application.before_filter :my_filter, :only => :show
-    end
-  end
-  
-  describe "skip before filters" do
-    it "should add a new skip before filter to ActiveAdmin::ResourceController" do
-      ActiveAdmin::ResourceController.should_receive(:skip_before_filter).and_return(true)
-      application.skip_before_filter :my_filter, :only => :show
-    end
+  it 'controllers_for_filters' do
+    expect(application.controllers_for_filters).to eq [
+      ActiveAdmin::BaseController, ActiveAdmin::Devise::SessionsController,
+      ActiveAdmin::Devise::PasswordsController, ActiveAdmin::Devise::UnlocksController,
+      ActiveAdmin::Devise::RegistrationsController, ActiveAdmin::Devise::ConfirmationsController
+    ]
   end
 
-  describe "after filters" do
-    it "should add a new after filter to ActiveAdmin::ResourceController" do
-      ActiveAdmin::ResourceController.should_receive(:after_filter).and_return(true)
-      application.after_filter :my_filter, :only => :show
-    end
+  it 'before_filter' do
+    controllers.each{ |c| expect(c).to receive(:before_filter).and_return(true) }
+    application.before_filter :my_filter, only: :show
   end
 
-  describe "around filters" do
-    it "should add a new around filter to ActiveAdmin::ResourceController" do
-      ActiveAdmin::ResourceController.should_receive(:around_filter).and_return(true)
-      application.around_filter :my_filter, :only => :show
-    end
+  it 'skip_before_filter' do
+    controllers.each{ |c| expect(c).to receive(:skip_before_filter).and_return(true) }
+    application.skip_before_filter :my_filter, only: :show
   end
 
+  it 'after_filter' do
+    controllers.each{ |c| expect(c).to receive(:after_filter).and_return(true) }
+    application.after_filter :my_filter, only: :show
+  end
+
+  it 'skip after_filter' do
+    controllers.each{ |c| expect(c).to receive(:skip_after_filter).and_return(true) }
+    application.skip_after_filter :my_filter, only: :show
+  end
+
+  it 'around_filter' do
+    controllers.each{ |c| expect(c).to receive(:around_filter).and_return(true) }
+    application.around_filter :my_filter, only: :show
+  end
+
+  it 'skip_filter' do
+    controllers.each{ |c| expect(c).to receive(:skip_filter).and_return(true) }
+    application.skip_filter :my_filter, only: :show
+  end
 end

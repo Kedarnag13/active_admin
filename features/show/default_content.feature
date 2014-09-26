@@ -13,18 +13,18 @@ Feature: Show - Default Content
     Then I should see the attribute "Title" with "Hello World"
     And I should see the attribute "Body" with "Empty"
     And I should see the attribute "Created At" with a nicely formatted datetime
-    And I should see the attribute "Author" with "jane_doe"
+    And I should see the attribute "Author" with "Jane Doe"
     And I should see an action item button "Delete Post"
     And I should see an action item button "Edit Post"
 
   Scenario: Attributes should link when linked resource is registered
     Given a show configuration of:
       """
-        ActiveAdmin.register User
         ActiveAdmin.register Post
+        ActiveAdmin.register User
       """
-    Then I should see the attribute "Author" with "jane_doe"
-    And I should see a link to "jane_doe"
+    Then I should see the attribute "Author" with "Jane Doe"
+    And I should see a link to "Jane Doe"
 
   Scenario: Customizing the attributes table with a set of attributes
     Given a show configuration of:
